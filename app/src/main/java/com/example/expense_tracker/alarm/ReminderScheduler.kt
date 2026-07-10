@@ -4,33 +4,41 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import java.util.Calendar
 
-/**
- * Clase utilitaria para programar el recordatorio diario usando AlarmManager.
- * Usa alarmas exactas para garantizar que las notificaciones lleguen a la hora configurada,
- * incluso con optimización de batería activa (Doze mode).
- */
 object ReminderScheduler {
 
-    private const val ALARM_REQUEST_CODE = 1001
+    const val EXTRA_MED_ID = "extra_medication_id"
+    const val EXTRA_MED_NOMBRE = "extra_medication_nombre"
+    const val EXTRA_MED_DOSIS = "extra_medication_dosis"
+    const val EXTRA_MED_HORA = "extra_medication_hora"
+    const val EXTRA_MED_MINUTO = "extra_medication_minuto"
 
-    /**
-     * Programa un recordatorio diario a la hora indicada.
-     */
-    fun programarRecordatorio(context: Context, hora: Int, minuto: Int) {
+    fun programarRecordatorio(
+        context: Context,
+        medicamentoId: Int,
+        nombre: String,
+        dosis: String,
+        hora: Int,
+        minuto: Int
+    ) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-        val intent = Intent(context, AlarmReceiver::class.java)
+        val intent = Intent(context, AlarmReceiver::class.java).apply {
+            putExtra(EXTRA_MED_ID, medicamentoId)
+            putExtra(EXTRA_MED_NOMBRE, nombre)
+            putExtra(EXTRA_MED_DOSIS, dosis)
+            putExtra(EXTRA_MED_HORA, hora)
+            putExtra(EXTRA_MED_MINUTO, minuto)
+        }
+
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            ALARM_REQUEST_CODE,
+            medicamentoId, // request code único por medicamento
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Calcular el tiempo para la próxima alarma
         val calendario = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hora)
             set(Calendar.MINUTE, minuto)
@@ -38,37 +46,24 @@ object ReminderScheduler {
             set(Calendar.MILLISECOND, 0)
         }
 
-        // Si ya pasó la hora, programar para mañana
         if (calendario.timeInMillis <= System.currentTimeMillis()) {
             calendario.add(Calendar.DAY_OF_MONTH, 1)
         }
 
-        // Usar setExactAndAllowWhileIdle para que funcione en Doze mode
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                calendario.timeInMillis,
-                pendingIntent
-            )
-        } else {
-            alarmManager.setExact(
-                AlarmManager.RTC_WAKEUP,
-                calendario.timeInMillis,
-                pendingIntent
-            )
-        }
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            calendario.timeInMillis,
+            pendingIntent
+        )
     }
 
-    /**
-     * Cancela el recordatorio programado.
-     */
-    fun cancelarRecordatorio(context: Context) {
+    fun cancelarRecordatorio(context: Context, medicamentoId: Int) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
         val intent = Intent(context, AlarmReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            ALARM_REQUEST_CODE,
+            medicamentoId,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )

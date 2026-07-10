@@ -13,61 +13,53 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.expense_tracker.alarm.ReminderPreferences
 import com.example.expense_tracker.alarm.ReminderScheduler
 import com.example.expense_tracker.data.local.AppDatabase
-import com.example.expense_tracker.data.repository.ExpenseRepository
-import com.example.expense_tracker.ui.ExpenseScreen
-import com.example.expense_tracker.ui.ExpenseViewModel
-import com.example.expense_tracker.ui.ExpenseViewModelFactory
-import com.example.expense_tracker.ui.theme.Expense_TrackerTheme
+import com.example.expense_tracker.data.local.MedicationEntity
+import com.example.expense_tracker.data.repository.MedicationRepository
+import com.example.expense_tracker.ui.MedicationScreen
+import com.example.expense_tracker.ui.MedicationViewModel
+import com.example.expense_tracker.ui.MedicationViewModelFactory
+import com.example.expense_tracker.ui.theme.MedRecordatorioTheme
 
 class MainActivity : ComponentActivity() {
 
-    // Guardamos la hora pendiente por si hay que pedir permiso primero
-    private var horaPendiente = 21
-    private var minutoPendiente = 0
+    private var medicamentoPendiente: MedicationEntity? = null
 
-    // Launcher para pedir permiso de notificaciones
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            ReminderScheduler.programarRecordatorio(this, horaPendiente, minutoPendiente)
+            medicamentoPendiente?.let { programarAlarma(it) }
         }
+        medicamentoPendiente = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Crear dependencias
         val database = AppDatabase.getInstance(applicationContext)
-        val repository = ExpenseRepository(database.expenseDao())
-
-        // Cargar preferencias guardadas
-        val recordatorioActivo = ReminderPreferences.estaActivo(this)
-        val horaGuardada = ReminderPreferences.obtenerHora(this)
-        val minutoGuardado = ReminderPreferences.obtenerMinuto(this)
-
-        val viewModelFactory = ExpenseViewModelFactory(
-            repository,
-            recordatorioActivo,
-            horaGuardada,
-            minutoGuardado
-        )
+        val repository = MedicationRepository(database.medicationDao())
+        val viewModelFactory = MedicationViewModelFactory(repository)
 
         setContent {
-            Expense_TrackerTheme{
+            MedRecordatorioTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val viewModel: ExpenseViewModel = viewModel(factory = viewModelFactory)
+                    val viewModel: MedicationViewModel = viewModel(factory = viewModelFactory)
 
-                    ExpenseScreen(
+                    MedicationScreen(
                         viewModel = viewModel,
-                        onRecordatorioChange = { activo, hora, minuto ->
-                            manejarCambioRecordatorio(activo, hora, minuto)
+                        onMedicamentoGuardado = { medicamento -> solicitarProgramacion(medicamento) },
+                        onRecordatorioToggle = { medicamento -> solicitarProgramacion(medicamento) },
+                        onRecordatorioDesactivado = { medicamento ->
+                            ReminderScheduler.cancelarRecordatorio(this, medicamento.id)
+                        },
+                        onHoraActualizada = { medicamento -> solicitarProgramacion(medicamento) },
+                        onMedicamentoEliminado = { medicamento ->
+                            ReminderScheduler.cancelarRecordatorio(this, medicamento.id)
                         }
                     )
                 }
@@ -75,36 +67,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Maneja los cambios en la configuración del recordatorio.
-     */
-    private fun manejarCambioRecordatorio(activo: Boolean, hora: Int, minuto: Int) {
-        // Guardar preferencias siempre
-        ReminderPreferences.guardarConfiguracion(this, activo, hora, minuto)
+    private fun solicitarProgramacion(medicamento: MedicationEntity) {
+        if (!medicamento.activo) return
 
-        if (!activo) {
-            ReminderScheduler.cancelarRecordatorio(this)
-            return
-        }
-
-        horaPendiente = hora
-        minutoPendiente = minuto
-
-        // Verificar permisos (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             when {
                 ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED -> {
-                    ReminderScheduler.programarRecordatorio(this, hora, minuto)
-                }
+                ) == PackageManager.PERMISSION_GRANTED -> programarAlarma(medicamento)
+
                 else -> {
+                    medicamentoPendiente = medicamento
                     requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
         } else {
-            ReminderScheduler.programarRecordatorio(this, hora, minuto)
+            programarAlarma(medicamento)
         }
+    }
+
+    private fun programarAlarma(medicamento: MedicationEntity) {
+        ReminderScheduler.programarRecordatorio(
+            this,
+            medicamento.id,
+            medicamento.nombre,
+            medicamento.dosis,
+            medicamento.hora,
+            medicamento.minuto
+        )
     }
 }

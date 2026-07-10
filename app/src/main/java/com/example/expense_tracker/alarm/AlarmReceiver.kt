@@ -6,69 +6,79 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import androidx.core.app.NotificationCompat
 import com.example.expense_tracker.MainActivity
 import com.example.expense_tracker.R
 
-/**
- * BroadcastReceiver que se ejecuta cuando la alarma se dispara.
- * Funciona incluso con la app completamente cerrada.
- */
 class AlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        mostrarNotificacion(context)
+        val medicamentoId = intent.getIntExtra(ReminderScheduler.EXTRA_MED_ID, -1)
+        val nombre = intent.getStringExtra(ReminderScheduler.EXTRA_MED_NOMBRE) ?: "Medicamento"
+        val dosis = intent.getStringExtra(ReminderScheduler.EXTRA_MED_DOSIS) ?: ""
+        val hora = intent.getIntExtra(ReminderScheduler.EXTRA_MED_HORA, 0)
+        val minuto = intent.getIntExtra(ReminderScheduler.EXTRA_MED_MINUTO, 0)
 
-        // Reprogramar para el día siguiente
-        val hora = ReminderPreferences.obtenerHora(context)
-        val minuto = ReminderPreferences.obtenerMinuto(context)
-        ReminderScheduler.programarRecordatorio(context, hora, minuto)
+        mostrarNotificacion(context, medicamentoId, nombre, dosis)
+
+        // Reprogramar la misma hora para el día siguiente
+        if (medicamentoId != -1) {
+            ReminderScheduler.programarRecordatorio(context, medicamentoId, nombre, dosis, hora, minuto)
+        }
     }
 
-    private fun mostrarNotificacion(context: Context) {
+    private fun mostrarNotificacion(context: Context, medicamentoId: Int, nombre: String, dosis: String) {
         val notificationManager = context
             .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // Crear el canal (obligatorio desde Android 8.0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val canal = NotificationChannel(
-                CHANNEL_ID,
-                "Recordatorios",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Recordatorios diarios de gastos"
-                enableVibration(true)
-            }
-            notificationManager.createNotificationChannel(canal)
-        }
+        val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
 
-        // Intent para abrir la app al tocar la notificación
+        val canal = NotificationChannel(
+            CHANNEL_ID,
+            "Recordatorios de medicamentos",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Avisos para tomar tus medicamentos a la hora indicada"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 500, 250, 500, 250, 500)
+            setSound(soundUri, audioAttributes)
+        }
+        notificationManager.createNotificationChannel(canal)
+
         val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
-            0,
+            medicamentoId,
             openIntent,
             PendingIntent.FLAG_IMMUTABLE
         )
 
+        val texto = if (dosis.isNotBlank()) "Dosis: $dosis" else "Es hora de tu medicamento"
+
         val notificacion = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("¿Registraste tus gastos?")
-            .setContentText("No olvides anotar lo que gastaste hoy")
+            .setContentTitle("Hora de tomar: $nombre")
+            .setContentText(texto)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
 
-        notificationManager.notify(NOTIFICATION_ID, notificacion)
+        // ID único por medicamento para que no se sobrescriban notificaciones distintas
+        notificationManager.notify(NOTIFICATION_ID_BASE + medicamentoId, notificacion)
     }
 
     companion object {
-        const val CHANNEL_ID = "expense_reminder_channel"
-        const val NOTIFICATION_ID = 1001
+        const val CHANNEL_ID = "medication_reminder_channel"
+        private const val NOTIFICATION_ID_BASE = 2000
     }
 }
